@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserPlus, CheckSquare, BarChart2, History, Landmark, Trash, Pencil, BarChartBig, Download, MessageSquare, Smartphone } from 'lucide-react';
+import { UserPlus, CheckSquare, BarChart2, History, Landmark, Trash, Pencil, BarChartBig, Download, MessageSquare, Smartphone, AlertCircle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import * as XLSX from 'xlsx';
 
@@ -64,6 +64,7 @@ const TABS = [
   { key: 'dashboard', label: 'Dashboard Stats', icon: BarChart2 },
   { key: 'history', label: 'Attendance History', icon: History },
   { key: 'graph', label: 'Attendance Graph', icon: BarChartBig },
+  { key: 'absent', label: 'Absent more than 3 days', icon: AlertCircle },
 ];
 
 // Notification message template
@@ -81,6 +82,7 @@ function App() {
   const [peoplePage, setPeoplePage] = useState(1);
   const [peopleSearch, setPeopleSearch] = useState('');
   const [attendanceSearch, setAttendanceSearch] = useState('');
+  const [showBulkModal, setShowBulkModal] = useState(false);
 
   // Filtered People List
   const filteredPeople = people.filter(p =>
@@ -222,15 +224,18 @@ function App() {
           Address: person.address,
         };
         namazes.forEach(namaz => {
-          row[namaz] = attendance[date]?.[person.id]?.[namaz] ? 'Present' : '';
+          row[namaz] = attendance[date]?.[person.id]?.[namaz] ? 'Present' : 'Absent';
         });
+        // Total absent for this row (day)
+        row['Total Absent Namaz'] = namazes.filter(namaz => !attendance[date]?.[person.id]?.[namaz]).length;
         rows.push(row);
       });
     });
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
-    XLSX.writeFile(wb, 'attendance.xlsx');
+    const todayStr = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `attendance-${todayStr}.xlsx`);
   };
 
   // Handle Excel upload for restore
@@ -275,6 +280,20 @@ function App() {
     };
     reader.readAsArrayBuffer(file);
   };
+
+  // Calculate absent > 3 days
+  const absentPeople = people.map(person => {
+    let absentDates = [];
+    allDates.forEach(date => {
+      const isFri = isFriday(date);
+      const namazes = isFri ? [...NAMAZES, 'Jumuah'] : NAMAZES;
+      const day = attendance[date]?.[person.id] || {};
+      // Absent if not present for any namaz that day
+      const presentAny = namazes.some(namaz => day[namaz]);
+      if (!presentAny) absentDates.push(date);
+    });
+    return { ...person, absentCount: absentDates.length, absentDates };
+  }).filter(p => p.absentCount > 3);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-200">
@@ -636,7 +655,9 @@ function App() {
                           <td className="px-2 py-2 whitespace-nowrap text-gray-900 font-semibold">{date} <span className="text-gray-500">{namaz}</span></td>
                           {people.map(person => (
                             <td key={person.id} className="px-2 py-2 text-center">
-                              {attendance[date]?.[person.id]?.[namaz] ? '✔️' : ''}
+                              {attendance[date]?.[person.id]?.[namaz]
+                                ? '✔️'
+                                : <span className="text-red-500">❌</span>}
                             </td>
                           ))}
                         </tr>
@@ -686,6 +707,56 @@ function App() {
             )}
           </div>
         )}
+
+        {activeTab === 'absent' && (
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-4 sm:p-8 animate-fadein animated-card">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-2xl font-bold text-primary-700 flex items-center"><AlertCircle className="w-6 h-6 mr-2 text-primary-500" />Absent more than 3 days</h2>
+              {/* Bulk Notify button hidden as per request */}
+            </div>
+            {absentPeople.length === 0 ? (
+              <p className="text-gray-500">No one has been absent for more than 3 days.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 rounded-lg overflow-hidden shadow-sm text-xs sm:text-sm">
+                  <thead className="bg-primary-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-primary-700 uppercase tracking-wider">Name</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-primary-700 uppercase tracking-wider">Mobile</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-primary-700 uppercase tracking-wider">Address</th>
+                      <th className="px-4 py-2 text-center text-xs font-medium text-primary-700 uppercase tracking-wider">Absent Days</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-primary-700 uppercase tracking-wider">Absent Dates</th>
+                      <th className="px-4 py-2 text-center text-xs font-medium text-primary-700 uppercase tracking-wider">Notify</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-100">
+                    {absentPeople.map(person => (
+                      <tr key={person.id} className="hover:bg-primary-50 transition">
+                        <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">{person.name}</td>
+                        <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">{person.mobile}</td>
+                        <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">{person.address}</td>
+                        <td className="px-4 py-2 text-center text-sm text-red-700 font-bold">{person.absentCount}</td>
+                        <td className="px-4 py-2 text-xs text-gray-700">{person.absentDates.join(', ')}</td>
+                        <td className="px-4 py-2 text-center">
+                          <button
+                            className="text-green-600 hover:text-green-800 p-1 rounded-full hover:bg-green-50 transition animated-btn"
+                            title="Send WhatsApp"
+                            onClick={() => {
+                              const msg = encodeURIComponent(getNotificationMessage(person));
+                              window.open(`https://wa.me/91${person.mobile}?text=${msg}`, '_blank');
+                            }}
+                          >
+                            <MessageSquare className="w-5 h-5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
       </main>
 
       {/* Delete Confirmation Modal */}
@@ -718,6 +789,67 @@ function App() {
                 }}
               >
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Notify Modal */}
+      {showBulkModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 animate-fadein">
+          <div className="bg-white rounded-xl shadow-lg p-6 w-full max-w-lg animate-slidein-up">
+            <h3 className="text-lg font-bold mb-4 text-primary-700 flex items-center"><MessageSquare className="w-5 h-5 mr-2 text-primary-500" />Bulk WhatsApp Notification</h3>
+            <p className="mb-4 text-gray-700 text-sm">Send WhatsApp messages to the following absent people:</p>
+            <div className="max-h-64 overflow-y-auto mb-4">
+              <table className="min-w-full text-xs sm:text-sm">
+                <thead>
+                  <tr>
+                    <th className="px-2 py-1 text-left font-medium text-primary-700">Name</th>
+                    <th className="px-2 py-1 text-left font-medium text-primary-700">Mobile</th>
+                    <th className="px-2 py-1 text-center font-medium text-primary-700">Send</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {absentPeople.map(person => (
+                    <tr key={person.id}>
+                      <td className="px-2 py-1 whitespace-nowrap">{person.name}</td>
+                      <td className="px-2 py-1 whitespace-nowrap">{person.mobile}</td>
+                      <td className="px-2 py-1 text-center">
+                        <button
+                          className="text-green-600 hover:text-green-800 p-1 rounded-full hover:bg-green-50 transition animated-btn"
+                          title="Send WhatsApp"
+                          onClick={() => {
+                            const msg = encodeURIComponent(getNotificationMessage(person));
+                            window.open(`https://wa.me/91${person.mobile}?text=${msg}`, '_blank');
+                          }}
+                        >
+                          <MessageSquare className="w-5 h-5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                className="px-4 py-2 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 animated-btn"
+                onClick={() => setShowBulkModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 rounded bg-primary-600 text-white hover:bg-primary-700 animated-btn"
+                onClick={() => {
+                  absentPeople.forEach(person => {
+                    const msg = encodeURIComponent(getNotificationMessage(person));
+                    window.open(`https://wa.me/91${person.mobile}?text=${msg}`, '_blank');
+                  });
+                  setShowBulkModal(false);
+                }}
+              >
+                Send All
               </button>
             </div>
           </div>

@@ -8,6 +8,7 @@ const ContactTrendsChart = ({ data }) => {
   };
 
   return (
+    
     <div className="chart-container">
       <h3 className="text-lg font-semibold text-gray-900 mb-4">Contact Trends This Week</h3>
       <ResponsiveContainer width="100%" height={300}>
